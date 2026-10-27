@@ -64,6 +64,7 @@ class OrderApiTest extends TestCase
         $this->assertDatabaseHas('order_items', ['quantity' => 3]);
         $this->createOrder([['product_id' => $p->id, 'quantity' => 1]])->assertUnprocessable();
         $this->createOrder([['product_id' => $p->id, 'quantity' => 0]])->assertUnprocessable();
+        $this->createOrder([['product_id' => $p->id, 'quantity' => -1]])->assertUnprocessable();
         $this->createOrder([['product_id' => $p->id, 'quantity' => 'x']])->assertUnprocessable();
         $this->createOrder([])->assertUnprocessable();
     }
@@ -81,6 +82,7 @@ class OrderApiTest extends TestCase
         $p = $this->product(10);
         $this->createOrder([['product_id' => $p->id, 'quantity' => 1]]);
         $this->createOrder([['product_id' => $p->id, 'quantity' => 1]]);
+        $this->getJson('/api/v1/customers/orders?email=a@example.com')->assertOk()->assertJsonPath('meta.total', 2);
         $this->getJson('/api/v1/customers/orders?email=nobody@example.com')->assertNotFound();
         $this->getJson('/api/v1/customers/orders?email=missing')->assertUnprocessable();
         $this->getJson('/api/v1/customers/orders')->assertUnprocessable();

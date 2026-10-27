@@ -4,18 +4,30 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
-use App\Models\Customer;
 use App\Models\Product;
 use Illuminate\Console\Command;
+use Illuminate\Process\Pool;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Process;
 
 final class OrdersConcurrencyDemo extends Command
 {
     protected $signature = 'orders:concurrency-demo {--product=} {--requests=5}';
 
-    protected $description = 'Prepare a one-unit product for a concurrency demonstration.';
+    protected $description = 'Run concurrent one-unit order attempts.';
 
     public function handle(): int
     {
+        if (DB::connection()->getDriverName() === 'sqlite') {
+            $this->error('Concurrency demo requires MySQL or PostgreSQL.');
+
+            return self::FAILURE;
+        }
+        if (DB::connection()->getDriverName() === 'sqlite') {
+            $this->error('Concurrency demo requires MySQL or PostgreSQL; SQLite is refused.');
+
+            return self::FAILURE;
+        }
         $product = Product::find($this->option('product')) ?? Product::first();
         if (! $product) {
             $this->error('No product exists.');
@@ -23,11 +35,27 @@ final class OrdersConcurrencyDemo extends Command
             return self::FAILURE;
         }
         $product->update(['stock' => 1]);
-        $customer = Customer::factory()->create();
         $requests = max(1, (int) $this->option('requests'));
-        $this->line("Prepared product={$product->id}, customer={$customer->email}, requests={$requests}");
-        $this->line('Fire these POST requests concurrently against MySQL and count HTTP 201 responses.');
-        $this->line('success=1 failed='.($requests - 1));
+        $processes = Process::pool(function (Pool $pool) use ($product, $requests): void {
+            for ($i = 0; $i < $requests; $i++) {
+                $pool->as("request-{$i}")->command([
+                    PHP_BINARY, base_path('artisan'), 'orders:place-one',
+                    '--product='.$product->id, '--email="concurrency-'.$i.'@example.com"', '--qty=1',
+                ]);
+            }
+        })->start()->wait();
+        $counts = ['success' => 0, 'insufficient_stock' => 0, 'error' => 0];
+        foreach ($processes as $process) {
+            $payload = json_decode(trim($process->output()), true);
+            $status = $payload['status'] ?? 'error';
+            $counts[$status] = ($counts[$status] ?? 0) + 1;
+        }
+        $finalStock = (int) Product::findOrFail($product->id)->stock;
+        $this->table(['status', 'count'], collect($counts)->map(fn (int $count, string $status): array => [$status, $count])->values()->all());
+        $this->line('final_stock='.$finalStock);
+        if ($counts['success'] !== 1 || $counts['insufficient_stock'] !== $requests - 1 || $counts['error'] !== 0 || $finalStock !== 0) {
+            return self::FAILURE;
+        }
 
         return self::SUCCESS;
     }
