@@ -33,6 +33,14 @@ final class OrderController extends Controller
         return ProductResource::collection(Product::orderBy('name')->get());
     }
 
+    public function customer(Request $request): JsonResponse
+    {
+        $data = $request->validate(['email' => ['required', 'email']]);
+        $customer = Customer::where('email', $data['email'])->first();
+
+        return response()->json($customer ? ['id' => $customer->id, 'name' => $customer->name, 'email' => $customer->email] : null);
+    }
+
     public function lowStock(Request $request)
     {
         $threshold = $request->integer('threshold', config('inventory.low_stock_threshold'));

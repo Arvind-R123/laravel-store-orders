@@ -9,13 +9,13 @@ use App\Jobs\SendOrderConfirmation;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Product;
+use App\Services\OrderNumberGenerator;
 use App\Services\PricingCalculator;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 final class CreateOrder
 {
-    public function __construct(private PricingCalculator $pricing) {}
+    public function __construct(private PricingCalculator $pricing, private OrderNumberGenerator $numbers) {}
 
     public function handle(array $data): Order
     {
@@ -44,12 +44,12 @@ final class CreateOrder
                 }$lines[$id] = [$p, $line];
                 $sub += $line['line_subtotal'];
                 $tax += $line['line_tax'];
-            }$order = Order::create(['order_number' => 'ORD-'.now()->format('Ymd').'-'.strtoupper(Str::random(6)), 'customer_id' => $customer->id, 'subtotal' => $sub, 'tax_total' => $tax, 'grand_total' => $sub + $tax, 'status' => 'confirmed']);
+            }$order = Order::create(['order_number' => $this->numbers->generate(), 'customer_id' => $customer->id, 'subtotal' => $sub, 'tax_total' => $tax, 'grand_total' => $sub + $tax, 'status' => 'confirmed']);
             foreach ($lines as $pair) {
                 $order->items()->create(['product_id' => $pair[0]->id] + $pair[1]);
             }
 
-return $order;
+            return $order;
         }, config('inventory.transaction_attempts'));
         SendOrderConfirmation::dispatch($order->id)->afterCommit();
 
