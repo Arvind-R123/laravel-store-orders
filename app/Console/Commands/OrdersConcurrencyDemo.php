@@ -23,17 +23,13 @@ final class OrdersConcurrencyDemo extends Command
 
             return self::FAILURE;
         }
-        if (DB::connection()->getDriverName() === 'sqlite') {
-            $this->error('Concurrency demo requires MySQL or PostgreSQL; SQLite is refused.');
-
-            return self::FAILURE;
-        }
         $product = Product::find($this->option('product')) ?? Product::first();
         if (! $product) {
             $this->error('No product exists.');
 
             return self::FAILURE;
         }
+        $originalStock = (int) $product->stock;
         $product->update(['stock' => 1]);
         $requests = max(1, (int) $this->option('requests'));
         $processes = Process::pool(function (Pool $pool) use ($product, $requests): void {
@@ -50,13 +46,19 @@ final class OrdersConcurrencyDemo extends Command
             $status = $payload['status'] ?? 'error';
             $counts[$status] = ($counts[$status] ?? 0) + 1;
         }
-        $finalStock = (int) Product::findOrFail($product->id)->stock;
-        $this->table(['status', 'count'], collect($counts)->map(fn (int $count, string $status): array => [$status, $count])->values()->all());
-        $this->line('final_stock='.$finalStock);
-        if ($counts['success'] !== 1 || $counts['insufficient_stock'] !== $requests - 1 || $counts['error'] !== 0 || $finalStock !== 0) {
-            return self::FAILURE;
-        }
+        try {
+            $finalStock = (int) Product::findOrFail($product->id)->stock;
+            $this->table(['status', 'count'], collect($counts)->map(fn (int $count, string $status): array => [$status, $count])->values()->all());
+            $this->line('final_stock='.$finalStock);
 
-        return self::SUCCESS;
+            return $counts['success'] === 1
+                && $counts['insufficient_stock'] === $requests - 1
+                && $counts['error'] === 0
+                && $finalStock === 0
+                ? self::SUCCESS
+                : self::FAILURE;
+        } finally {
+            $product->update(['stock' => $originalStock]);
+        }
     }
 }
