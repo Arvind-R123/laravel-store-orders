@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\Product;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
 
 class OrderApiTest extends TestCase
@@ -34,7 +35,7 @@ class OrderApiTest extends TestCase
         $r->assertCreated()->assertJsonPath('data.subtotal', '20.00')->assertJsonPath('data.tax_total', '1.00');
         $this->assertDatabaseHas('products', ['id' => $p->id, 'stock' => 8]);
         $this->assertDatabaseHas('order_items', ['product_id' => $p->id, 'unit_price' => 1000]);
-        Queue::assertPushed(SendOrderConfirmation::class);
+        Queue::assertPushedTimes(SendOrderConfirmation::class, 1);
     }
 
     public function test_customer_reused_and_new_customer_created(): void
@@ -67,6 +68,25 @@ class OrderApiTest extends TestCase
         $this->createOrder([['product_id' => $p->id, 'quantity' => -1]])->assertUnprocessable();
         $this->createOrder([['product_id' => $p->id, 'quantity' => 'x']])->assertUnprocessable();
         $this->createOrder([])->assertUnprocessable();
+    }
+
+    #[TestWith([0])]
+    #[TestWith([-1])]
+    #[TestWith(['abc'])]
+    #[TestWith([1.5])]
+    public function test_invalid_quantity_returns_422(mixed $quantity): void
+    {
+        $product = $this->product();
+
+        $this->createOrder([['product_id' => $product->id, 'quantity' => $quantity]])
+            ->assertUnprocessable();
+    }
+
+    public function test_missing_items_returns_422(): void
+    {
+        $this->postJson('/api/v1/orders', [
+            'customer' => ['email' => 'a@example.com', 'name' => 'Alice'],
+        ])->assertUnprocessable();
     }
 
     public function test_unknown_product_and_multiline_rollback(): void

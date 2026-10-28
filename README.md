@@ -1,6 +1,6 @@
 # Store Order & Inventory Mini-System
 
-Laravel 13.17 / PHP 8.3+ application for an Indian retail counter: products, stock-safe orders, customer history, low-stock reporting, and queued confirmation logging.
+Laravel 13.39 / PHP 8.4 application for an Indian retail counter: products, stock-safe orders, customer history, low-stock reporting, and queued confirmation logging.
 
 ## Setup
 
@@ -13,7 +13,7 @@ php artisan serve
 php artisan queue:work
 ```
 
-SQLite is the default; MySQL/PostgreSQL work by changing the standard DB variables. `QUEUE_CONNECTION=database` is recommended in `.env`.
+MySQL is the primary application database. SQLite is configured through `phpunit.xml` for the fast, isolated in-memory test suite; PostgreSQL is also compatible when the standard DB variables are changed. `QUEUE_CONNECTION=database` is recommended in `.env`.
 
 ## Configuration
 
@@ -25,7 +25,7 @@ SQLite is the default; MySQL/PostgreSQL work by changing the standard DB variabl
 
 ## Design and assumptions
 
-Money is integer minor units (paise), tax is calculated per line with half-up rounding, and order items snapshot price/tax. Duplicate lines merge by product. Existing customers are reused without overwriting names. Low-stock means strictly below threshold. Orders start `confirmed`; no authentication is included for this counter-system scope. INR is the single currency. Conditional stock updates plus row locks prevent overselling; SQLite serializes writers, while MySQL is the true row-lock demonstration. The wireframe's inconsistent numbers are ignored in favor of real calculations. PDF/email delivery is out of scope; the job writes a structured log entry.
+The full assumptions are: money is integer minor units (paise); INR is the only currency; tax is calculated per line with half-up rounding; order items snapshot price/tax; duplicate lines merge by product; existing customers are reused by email without overwriting names; new customers require a name; low-stock means strictly below threshold; orders start `confirmed`; stock must never become negative; inventory and order creation share one transaction; MySQL row-level locking and conditional updates provide the production concurrency guarantee; SQLite serializes writers and is only for isolated tests; no authentication is included for this counter-system scope; confirmation dispatch occurs after commit; and the job writes a structured log entry rather than sending email.
 
 ## Architecture
 
@@ -33,8 +33,12 @@ Money is integer minor units (paise), tax is calculated per line with half-up ro
 
 ## Tests and concurrency
 
-Run `php artisan test` and `vendor/bin/pint`. The intended suite uses RefreshDatabase and in-memory SQLite. A production concurrency stress command should target MySQL with one remaining unit; the conditional update is the deterministic guard. This environment currently lacks `pdo_sqlite`, so migrations/tests could not execute here.
+Run `php artisan test` and `vendor/bin/pint --dirty --format agent`. The suite uses `RefreshDatabase` and in-memory SQLite. For the concurrency demo: configure `.env` for MySQL or PostgreSQL, run `php artisan migrate --seed`, ensure the selected product exists, then run `php artisan orders:concurrency-demo --product=<id> --requests=5`. The command resets the selected product to one unit and expects one success, four insufficient-stock responses, no errors, and final stock of zero. SQLite is intentionally refused for this demo.
 
 ## Limitations / next steps
 
-Add authentication, idempotency keys, returns/cancellations, an inventory ledger, rate limiting, and richer observability. Laravel Boost installation was attempted but Packagist was unreachable, so no Boost-specific generated guidance was available.
+The API has no authentication, authorization, rate limiting, idempotency keys, or duplicate-retry protection. There is no inventory ledger, returns/cancellations workflow, reservation expiry, or external email delivery. Observability is limited to application logs. The concurrency demo is diagnostic rather than a load test and requires row-level locking.
+
+## Wireframe inconsistencies
+
+The wireframe's product prices, totals, stock values, and customer/order examples are inconsistent with one another. The persisted catalog, configured tax rules, and calculated totals are authoritative; wireframe-only values and PDF/email delivery are outside this implementation's scope.
