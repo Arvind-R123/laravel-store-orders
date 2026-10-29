@@ -1,44 +1,207 @@
 # Store Order & Inventory Mini-System
 
+## Overview
+
 Laravel 13.39 / PHP 8.4 application for an Indian retail counter: products, stock-safe orders, customer history, low-stock reporting, and queued confirmation logging.
+
+### Tech stack
+
+- PHP 8.4 with `pdo_mysql` and `pdo_sqlite`
+- Laravel 13.39
+- Composer 2.x
+- MySQL 8.x for the application and concurrency demo
+- SQLite in-memory database for tests
+- Blade/Vite, Laravel queues, PHPUnit, and Pint
+
+## Prerequisites
+
+Install PHP 8.4 with `pdo_mysql` and `pdo_sqlite`, Composer 2.x, and MySQL 8.x. Verify:
+
+```sh
+php -v
+composer -V
+```
 
 ## Setup
 
+Create an empty MySQL database, then configure its name, username, and password in `.env`:
+
 ```sh
 composer install
-copy .env.example .env
+cp .env.example .env
 php artisan key:generate
 php artisan migrate --seed
 php artisan serve
 php artisan queue:work
 ```
 
-MySQL is the primary application database. SQLite is configured through `phpunit.xml` for the fast, isolated in-memory test suite; PostgreSQL is also compatible when the standard DB variables are changed. `QUEUE_CONNECTION=database` is recommended in `.env`.
+On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`. Run the server and queue worker in separate terminals. MySQL is the primary application database; SQLite is configured by `phpunit.xml` for isolated tests.
 
-## Configuration
+## Configuration reference
 
-`INVENTORY_LOW_STOCK_THRESHOLD` (10), `ORDER_MAX_ITEMS` (50), `ORDER_MAX_LINE_QUANTITY` (100), `ORDER_TRANSACTION_ATTEMPTS` (3), `DEFAULT_PER_PAGE` (15), `STORE_CURRENCY` (INR), `STORE_CURRENCY_SYMBOL` (₹), `STORE_TAX_ROUNDING` (half_up), and Laravel's standard DB, queue, log, and mail keys are configurable through `.env`.
+Every key in `.env.example` is listed below; blank means Laravel's default or intentionally unset.
 
-## API
+| Key | Default | Purpose |
+|---|---|---|
+| `APP_NAME` | `Laravel` | Application name |
+| `APP_ENV` | `local` | Environment |
+| `APP_KEY` | blank until generated | Encryption key |
+| `APP_DEBUG` | `true` | Debug output |
+| `APP_URL` | `http://localhost:8000` | Base URL |
+| `APP_LOCALE` | `en` | Locale |
+| `APP_FALLBACK_LOCALE` | `en` | Fallback locale |
+| `APP_FAKER_LOCALE` | `en_US` | Faker locale |
+| `APP_MAINTENANCE_DRIVER` | `file` | Maintenance driver |
+| `LOG_CHANNEL` | `stack` | Default log channel |
+| `LOG_STACK` | `single` | Stack channels |
+| `LOG_DEPRECATIONS_CHANNEL` | `null` | Deprecation channel |
+| `LOG_LEVEL` | `debug` | Minimum log level |
+| `DB_CONNECTION` | `sqlite` | Driver; use `mysql` locally |
+| `DB_HOST` | `127.0.0.1` | Database host |
+| `DB_PORT` | `3306` | Database port |
+| `DB_DATABASE` | `laravel` | Database name |
+| `DB_USERNAME` | `root` | Database user |
+| `DB_PASSWORD` | blank | Database password |
+| `SESSION_DRIVER` | `database` | Session store |
+| `SESSION_LIFETIME` | `120` | Lifetime in minutes |
+| `SESSION_ENCRYPT` | `false` | Encrypt sessions |
+| `SESSION_PATH` | `/` | Cookie path |
+| `SESSION_DOMAIN` | unset | Cookie domain |
+| `BROADCAST_CONNECTION` | `log` | Broadcast connection |
+| `FILESYSTEM_DISK` | `local` | Filesystem disk |
+| `QUEUE_CONNECTION` | `database` | Queue backend |
+| `INVENTORY_LOW_STOCK_THRESHOLD` | `10` | Low-stock threshold |
+| `ORDER_MAX_ITEMS` | `50` | Maximum order lines |
+| `ORDER_MAX_LINE_QUANTITY` | `100` | Maximum line quantity |
+| `ORDER_TRANSACTION_ATTEMPTS` | `3` | Transaction retries |
+| `DEFAULT_PER_PAGE` | `15` | History page size |
+| `STORE_CURRENCY` | `INR` | Currency code |
+| `STORE_CURRENCY_SYMBOL` | `₹` | Display symbol |
+| `STORE_TAX_ROUNDING` | `half_up` | Tax rounding |
+| `CACHE_STORE` | `database` | Cache backend |
+| `CACHE_PREFIX` | app-derived | Cache prefix |
+| `MAIL_MAILER` | `log` | Mail transport |
+| `MAIL_SCHEME` | unset | Mail scheme |
+| `MAIL_HOST` | `127.0.0.1` | Mail host |
+| `MAIL_PORT` | `2525` | Mail port |
+| `MAIL_USERNAME` | unset | Mail username |
+| `MAIL_PASSWORD` | unset | Mail password |
+| `MAIL_FROM_ADDRESS` | `hello@example.com` | Sender address |
+| `MAIL_FROM_NAME` | `${APP_NAME}` | Sender name |
+| `VITE_APP_NAME` | `${APP_NAME}` | Frontend app name |
 
-`POST /api/v1/orders` with `{"customer":{"email":"a@example.com","name":"A"},"items":[{"product_id":1,"quantity":2}]}` returns `201` and the order with fixed two-decimal strings. `GET /api/v1/products`, `GET /api/v1/products/low-stock?threshold=10`, and `GET /api/v1/customers/orders?email=a@example.com` provide catalog, low-stock, and paginated history. Validation and stock failures return `422` with `{message, errors}`; unknown customer history returns Laravel's JSON `404`; unexpected errors hide details when `APP_DEBUG=false`.
+## API reference
 
-## Design and assumptions
+All API routes are under `/api/v1`.
 
-The full assumptions are: money is integer minor units (paise); INR is the only currency; tax is calculated per line with half-up rounding; order items snapshot price/tax; duplicate lines merge by product; existing customers are reused by email without overwriting names; new customers require a name; low-stock means strictly below threshold; orders start `confirmed`; stock must never become negative; inventory and order creation share one transaction; MySQL row-level locking and conditional updates provide the production concurrency guarantee; SQLite serializes writers and is only for isolated tests; no authentication is included for this counter-system scope; confirmation dispatch occurs after commit; and the job writes a structured log entry rather than sending email.
+### Health
 
-## Architecture
+```sh
+curl http://localhost:8000/api/v1/health
+```
 
-`app/Actions/Orders` owns transactional orchestration; `app/Services` owns pure pricing; `app/Models` contains relationships/casts/scopes; requests/resources/controllers define the API boundary; `app/Jobs` handles post-commit confirmation. `database/` contains schema, factories, and realistic seed data. Prompt notes are in `/prompts`.
+Success: `200 {"status":"ok"}`.
 
-## Tests and concurrency
+### Products and low stock
 
-Run `php artisan test` and `vendor/bin/pint --dirty --format agent`. The suite uses `RefreshDatabase` and in-memory SQLite. For the concurrency demo: configure `.env` for MySQL or PostgreSQL, run `php artisan migrate --seed`, ensure the selected product exists, then run `php artisan orders:concurrency-demo --product=<id> --requests=5`. The command resets the selected product to one unit and expects one success, four insufficient-stock responses, no errors, and final stock of zero. SQLite is intentionally refused for this demo.
+```sh
+curl http://localhost:8000/api/v1/products
+curl "http://localhost:8000/api/v1/products/low-stock?threshold=10"
+```
 
-## Limitations / next steps
+Success: `200 {"data":[{"id":1,"name":"Rice","code":"RICE-1","price":"108.00","tax_percent":"5.00","stock":10}]}`. A negative threshold returns `422 {"message":"Invalid threshold"}`.
 
-The API has no authentication, authorization, rate limiting, idempotency keys, or duplicate-retry protection. There is no inventory ledger, returns/cancellations workflow, reservation expiry, or external email delivery. Observability is limited to application logs. The concurrency demo is diagnostic rather than a load test and requires row-level locking.
+### Customer lookup
 
-## Wireframe inconsistencies
+```sh
+curl "http://localhost:8000/api/v1/customers?email=a%40example.com"
+```
 
-The wireframe's product prices, totals, stock values, and customer/order examples are inconsistent with one another. The persisted catalog, configured tax rules, and calculated totals are authoritative; wireframe-only values and PDF/email delivery are outside this implementation's scope.
+Success: `200 {"id":1,"name":"A","email":"a@example.com"}`; unknown email returns `200 null`. Invalid email returns `422` with `{ "message": "The given data was invalid.", "errors": { ... } }`.
+
+### Create an order
+
+```sh
+curl -X POST http://localhost:8000/api/v1/orders -H "Content-Type: application/json" -d '{"customer":{"email":"a@example.com","name":"A"},"items":[{"product_id":1,"quantity":2}]}'
+```
+
+Success: `201 {"data":{"id":1,"order_number":"ORD-...","status":"confirmed","items":[...],"subtotal":"216.00","tax_total":"10.80","grand_total":"226.80"}}`. Insufficient stock returns `422 {"message":"Insufficient stock for product 1."}`. Invalid payloads return `422` with `{ "message": "The given data was invalid.", "errors": { ... } }`.
+
+### Customer order history
+
+```sh
+curl "http://localhost:8000/api/v1/customers/orders?email=a%40example.com&page=1"
+```
+
+Success: `200 {"data":[...],"links":{...},"meta":{...}}`. Unknown email returns `404 {"message":"No query results for model [App\\Models\\Customer]."}`; invalid email returns `422` with `{ "message": "The given data was invalid.", "errors": { ... } }`.
+
+## Tests
+
+The suite uses `RefreshDatabase` with in-memory SQLite:
+
+```sh
+php artisan test
+vendor/bin/pint
+```
+
+## Concurrency demo
+
+Configure `.env` for MySQL, seed the database, and run:
+
+```sh
+php artisan orders:concurrency-demo --requests=5
+```
+
+Expected output:
+
+```text
++--------------------+-------+
+| status             | count |
++--------------------+-------+
+| success            | 1     |
+| insufficient_stock | 4     |
+| error              | 0     |
++--------------------+-------+
+final_stock=0
+```
+
+The command temporarily sets the selected product to one unit and restores its original stock afterwards, including on failure. SQLite is refused for this demo.
+
+## Architecture and design decisions
+
+```text
+app/Actions/Orders       transactional order orchestration
+app/Console/Commands     operational and concurrency commands
+app/Http                 controllers, requests, and JSON resources
+app/Jobs                 after-commit confirmation logging
+app/Models               Eloquent models, relationships, casts, scopes
+app/Services              pricing and order-number services
+config/inventory.php     domain limits and store settings
+database/                migrations, factories, and seeders
+routes/                  web and API route definitions
+resources/               Blade UI and frontend assets
+tests/                   feature and unit tests
+prompts/                 AI prompt notes
+```
+
+Orders use `lockForUpdate` in sorted product-id order to reduce deadlocks. A conditional `UPDATE` is the final guard against negative inventory. Items snapshot price and tax. Confirmation work is dispatched after commit. Money is stored as integer paise and formatted as fixed two-decimal strings at the API boundary.
+
+## Assumptions
+
+- INR is the only currency; tax is calculated per line with half-up rounding.
+- Duplicate product lines merge; customers are reused by email without overwriting names.
+- New customers require a name; orders start as `confirmed`; stock must never be negative.
+- Low stock means strictly below the threshold.
+- MySQL locking and conditional updates provide the production concurrency guarantee; SQLite is only for isolated tests.
+- No authentication is included for this counter-system scope.
+- The job writes a structured log entry; PDF emailing is out of scope.
+- Products are seeded only; there is no CRUD.
+- The wireframe is a layout reference only. Inconsistencies: line totals `108 + 54 = 162` but subtotal shown as `210`; balance `22.80` but denomination breakdown sums to `23`.
+
+## Known limitations and next steps
+
+There is no authentication, authorization, rate limiting, idempotency key, inventory ledger, returns/cancellations workflow, reservation expiry, external email delivery, or robust observability. The concurrency demo is diagnostic rather than a load test. Next steps are authentication, an inventory ledger, idempotent submission, cancellation/returns, real email delivery, and production metrics/tracing.
+
+## AI usage and Prompt Log
+
+The `/prompts` directory contains the prompt log. AI produced first drafts; I reviewed the implementation and ran every command. I caught the stub concurrency demo, the UI 100x price bug, and Boost configuration noise.
